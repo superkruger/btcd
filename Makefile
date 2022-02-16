@@ -12,16 +12,18 @@ LINT_COMMIT := v1.18.0
 GOACC_COMMIT := 80342ae2e0fcf265e99e76bcc4efd022c7c3811b
 
 DEPGET := cd /tmp && GO111MODULE=on go get -v
-GOBUILD := GO111MODULE=on GOOS=linux GOARCH=amd64 go build -v
-WASMBUILD := GOOS=js GOARCH=wasm go build -o hash.wasm
-GOINSTALL := GO111MODULE=on GOOS=linux GOARCH=amd64 go install -v
+GOBUILD := GO111MODULE=on go build -v -o ./build/local
+GOBUILD_LINUX := GO111MODULE=on GOOS=linux GOARCH=amd64 go build -v -o ./build/linux
+WASMBUILD := GOOS=js GOARCH=wasm go build -o ./build/local/hash.wasm
+WASMBUILD_LINUX := GOOS=js GOARCH=wasm go build -o ./build/linux/hash.wasm
+GOINSTALL := GO111MODULE=on go install -v
 DEV_TAGS := rpctest
 GOTEST_DEV = GO111MODULE=on go test -v -tags=$(DEV_TAGS)
 GOTEST := GO111MODULE=on go test -v
 
 GOFILES_NOVENDOR = $(shell find . -type f -name '*.go' -not -path "./vendor/*")
 
-RM := rm -f
+RM := rm -rf
 CP := cp
 MAKE := make
 XARGS := xargs -L 1
@@ -66,12 +68,21 @@ goimports:
 
 build:
 	@$(call print, "Building all binaries")
+	mkdir -p build/local build/linux
 	$(GOBUILD) $(PKG)
 	$(GOBUILD) $(PKG)/cmd/btcctl
 	$(GOBUILD) $(PKG)/cmd/gencerts
 	$(GOBUILD) $(PKG)/cmd/findcheckpoint
 	$(GOBUILD) $(PKG)/cmd/addblock
+	$(GOBUILD) $(PKG)/cmd/btcdweb
 	$(WASMBUILD) $(PKG)/wasm
+	$(GOBUILD_LINUX) $(PKG)
+	$(GOBUILD_LINUX) $(PKG)/cmd/btcctl
+	$(GOBUILD_LINUX) $(PKG)/cmd/gencerts
+	$(GOBUILD_LINUX) $(PKG)/cmd/findcheckpoint
+	$(GOBUILD_LINUX) $(PKG)/cmd/addblock
+	$(GOBUILD_LINUX) $(PKG)/cmd/btcdweb
+	$(WASMBUILD_LINUX) $(PKG)/wasm
 
 # =======
 # TESTING
@@ -122,6 +133,7 @@ lint: $(LINT_BIN)
 clean:
 	@$(call print, "Cleaning source.$(NC)")
 	$(RM) coverage.txt btcec/coverage.txt btcutil/coverage.txt btcutil/psbt/coverage.txt
+	$(RM) build
 
 .PHONY: all \
 	default \
