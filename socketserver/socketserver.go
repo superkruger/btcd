@@ -7,7 +7,8 @@ import (
 )
 
 type HeaderProvider interface {
-	GetCurrentHeader() *wire.BlockHeader
+	GetHeaderProblem(request *wire.HeaderProblemRequest) (*wire.HeaderProblemResponse, error)
+	SetHeaderSolution(solution *wire.HeaderSolution) error
 }
 
 type HeaderMessage struct {
@@ -50,7 +51,7 @@ func (s *SocketServer) Start(headerProvider HeaderProvider) {
 		return
 	}
 
-	err = s.cl.RegisterName("RequestHeader", s.RequestHeader)
+	err = s.cl.RegisterName("RequestHeaderProblem", s.RequestHeaderProblem)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -107,21 +108,36 @@ func (s *SocketServer) Connected(unused int, unused2 *int) error {
 	return nil
 }
 
-func (s *SocketServer) RequestHeader(address string, unused *int) error {
-	fmt.Printf("Header Requested for %s\n", address)
+func (s *SocketServer) RequestHeaderProblem(request wire.HeaderProblemRequest, unused *int) error {
+	fmt.Printf("RequestHeaderProblem %v\n", request)
 
-	currentHeader := s.headerProvider.GetCurrentHeader()
-
-	headerMessage := HeaderMessage{
-		Header:  *currentHeader,
-		Address: address,
+	headerProblem, err := s.headerProvider.GetHeaderProblem(&request)
+	if err != nil {
+		return err
 	}
 
-	err := s.cl.Call("ForwardHeader", headerMessage, nil)
+	err = s.cl.Call("ReturnHeaderProblem", *headerProblem, nil)
 	if err != nil {
 		fmt.Printf("ForwardHeader Call failed: %s\n", err)
-		return nil
+		return err
 	}
+
+	return nil
+}
+
+func (s *SocketServer) ProvideHeaderSolution(solution wire.HeaderSolution, unused *int) error {
+	fmt.Printf("ProvideHeaderSolution %v\n", solution)
+
+	err := s.headerProvider.SetHeaderSolution(&solution)
+	if err != nil {
+		return err
+	}
+
+	//err = s.cl.Call("ReturnHeaderProblem", *headerProblem, nil)
+	//if err != nil {
+	//	fmt.Printf("ForwardHeader Call failed: %s\n", err)
+	//	return err
+	//}
 
 	return nil
 }

@@ -3,7 +3,6 @@ package websocketserver
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/btcsuite/btcd/socketserver"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/gorilla/websocket"
 	"log"
@@ -11,8 +10,8 @@ import (
 )
 
 type HeaderClient interface {
-	RequestHeader(message *MinerMessage, conn *websocket.Conn)
-	SolvedHash(message *MinerMessage, conn *websocket.Conn)
+	RequestHeaderProblem(request *wire.HeaderProblemRequest, conn *websocket.Conn)
+	ProvideHeaderSolution(headerSolution *wire.HeaderSolution, conn *websocket.Conn)
 }
 
 type WebsocketServer struct {
@@ -22,10 +21,12 @@ type WebsocketServer struct {
 }
 
 type MinerMessage struct {
-	Type       string
-	Address    string
-	ExtraNonce uint64
-	Header     wire.BlockHeader
+	Type            string
+	Address         string
+	Nonce           uint32
+	ExtraNonce      uint64
+	BlockHeight     int32
+	HashesPerSecond int32
 }
 
 func (s *WebsocketServer) socketHandler(w http.ResponseWriter, r *http.Request) {
@@ -62,10 +63,22 @@ func (s *WebsocketServer) socketHandler(w http.ResponseWriter, r *http.Request) 
 		switch minerMessage.Type {
 		case "REQUEST":
 			log.Println("REQUEST received")
-			s.headerclient.RequestHeader(&minerMessage, conn)
+			headerProblemRequest := wire.HeaderProblemRequest{
+				Address:         minerMessage.Address,
+				BlockHeight:     minerMessage.BlockHeight,
+				HashesPerSecond: minerMessage.HashesPerSecond,
+			}
+			s.headerclient.RequestHeaderProblem(&headerProblemRequest, conn)
 			break
 		case "SOLVED":
-			s.headerclient.SolvedHash(&minerMessage, conn)
+			log.Println("SOLVED received")
+			headerSolution := wire.HeaderSolution{
+				Address:     minerMessage.Address,
+				Nonce:       minerMessage.Nonce,
+				ExtraNonce:  minerMessage.ExtraNonce,
+				BlockHeight: minerMessage.BlockHeight,
+			}
+			s.headerclient.ProvideHeaderSolution(&headerSolution, conn)
 			break
 		default:
 			log.Println("Unknown message type", minerMessage.Type)
@@ -90,9 +103,9 @@ func (s *WebsocketServer) closeConn(conn *websocket.Conn) {
 	// TODO remove from array
 }
 
-func (s *WebsocketServer) ForwardHeader(message socketserver.HeaderMessage, conn *websocket.Conn) {
+func (s *WebsocketServer) SendHeaderProblem(headerProblem *wire.HeaderProblemResponse, conn *websocket.Conn) {
 
-	jsonMessage, err := json.Marshal(message)
+	jsonMessage, err := json.Marshal(headerProblem)
 	if err != nil {
 		log.Println("Error during message marshalling:", err)
 		return

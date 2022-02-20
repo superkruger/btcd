@@ -12,6 +12,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/btcsuite/btcd/mining/delegateminer"
 	"math"
 	"net"
 	"runtime"
@@ -25,6 +26,8 @@ import (
 	"github.com/btcsuite/btcd/addrmgr"
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/blockchain/indexers"
+	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/btcutil/bloom"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/connmgr"
@@ -36,8 +39,6 @@ import (
 	"github.com/btcsuite/btcd/peer"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/bloom"
 )
 
 const (
@@ -215,6 +216,7 @@ type server struct {
 	chain                *blockchain.BlockChain
 	txMemPool            *mempool.TxPool
 	cpuMiner             *cpuminer.CPUMiner
+	delegateMiner        *delegateminer.DelegateMiner
 	modifyRebroadcastInv chan interface{}
 	newPeers             chan *serverPeer
 	donePeers            chan *serverPeer
@@ -2391,6 +2393,9 @@ func (s *server) Start() {
 	// Start the CPU miner if generation is enabled.
 	if cfg.Generate {
 		s.cpuMiner.Start()
+		if cfg.Delegate {
+			s.delegateMiner.Start()
+		}
 	}
 }
 
@@ -2407,6 +2412,9 @@ func (s *server) Stop() error {
 
 	// Stop the CPU miner if needed
 	s.cpuMiner.Stop()
+
+	// Stop the Delegate miner if needed
+	s.delegateMiner.Stop()
 
 	// Shutdown the RPC server if it's not disabled.
 	if !cfg.DisableRPC {
@@ -2828,6 +2836,14 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 		ChainParams:            chainParams,
 		BlockTemplateGenerator: blockTemplateGenerator,
 		MiningAddrs:            cfg.miningAddrs,
+		ProcessBlock:           s.syncManager.ProcessBlock,
+		ConnectedCount:         s.ConnectedCount,
+		IsCurrent:              s.syncManager.IsCurrent,
+	})
+	s.delegateMiner = delegateminer.New(&delegateminer.Config{
+		ChainParams:            chainParams,
+		BlockTemplateGenerator: blockTemplateGenerator,
+		DelegateAddrs:          cfg.delegateAddrs,
 		ProcessBlock:           s.syncManager.ProcessBlock,
 		ConnectedCount:         s.ConnectedCount,
 		IsCurrent:              s.syncManager.IsCurrent,

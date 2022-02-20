@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/connmgr"
@@ -30,7 +31,6 @@ import (
 	"github.com/btcsuite/btcd/mempool"
 	"github.com/btcsuite/btcd/peer"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/go-socks/socks"
 	flags "github.com/jessevdk/go-flags"
 )
@@ -114,6 +114,8 @@ type config struct {
 	DataDir              string        `short:"b" long:"datadir" description:"Directory to store data"`
 	DbType               string        `long:"dbtype" description:"Database backend to use for the Block Chain"`
 	DebugLevel           string        `short:"d" long:"debuglevel" description:"Logging level for all subsystems {trace, debug, info, warn, error, critical} -- You may also specify <subsystem>=<level>,<subsystem2>=<level>,... to set the log level for individual subsystems -- Use show to list available subsystems"`
+	Delegate             bool          `long:"delegate" description:"Delegate bitcoin mining to clients"`
+	DelegateAddrs        []string      `long:"delegateaddr" description:"Add the specified payment address to the list of addresses to use for generated blocks in delegate miner -- At least one address is required if the generate option is set"`
 	DropAddrIndex        bool          `long:"dropaddrindex" description:"Deletes the address-based transaction index from the database on start up and then exits."`
 	DropCfIndex          bool          `long:"dropcfindex" description:"Deletes the index used for committed filtering (CF) support from the database on start up and then exits."`
 	DropTxIndex          bool          `long:"droptxindex" description:"Deletes the hash-based transaction index from the database on start up and then exits."`
@@ -178,6 +180,7 @@ type config struct {
 	dial                 func(string, string, time.Duration) (net.Conn, error)
 	addCheckpoints       []chaincfg.Checkpoint
 	miningAddrs          []btcutil.Address
+	delegateAddrs        []btcutil.Address
 	minRelayTxFee        btcutil.Amount
 	whitelists           []*net.IPNet
 }
@@ -945,10 +948,42 @@ func loadConfig() (*config, []string, error) {
 		cfg.miningAddrs = append(cfg.miningAddrs, addr)
 	}
 
+	// Check delegate mining addresses are valid and saved parsed versions.
+	cfg.delegateAddrs = make([]btcutil.Address, 0, len(cfg.DelegateAddrs))
+	for _, strAddr := range cfg.DelegateAddrs {
+		addr, err := btcutil.DecodeAddress(strAddr, ActiveNetParams.Params)
+		if err != nil {
+			str := "%s: delegate mining address '%s' failed to decode: %v"
+			err := fmt.Errorf(str, funcName, strAddr, err)
+			fmt.Fprintln(os.Stderr, err)
+			fmt.Fprintln(os.Stderr, usageMessage)
+			return nil, nil, err
+		}
+		if !addr.IsForNet(ActiveNetParams.Params) {
+			str := "%s: delegate mining address '%s' is on the wrong network"
+			err := fmt.Errorf(str, funcName, strAddr)
+			fmt.Fprintln(os.Stderr, err)
+			fmt.Fprintln(os.Stderr, usageMessage)
+			return nil, nil, err
+		}
+		cfg.delegateAddrs = append(cfg.delegateAddrs, addr)
+	}
+
 	// Ensure there is at least one mining address when the generate flag is
 	// set.
 	if cfg.Generate && len(cfg.MiningAddrs) == 0 {
 		str := "%s: the generate flag is set, but there are no mining " +
+			"addresses specified "
+		err := fmt.Errorf(str, funcName)
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, usageMessage)
+		return nil, nil, err
+	}
+
+	// Ensure there is at least one delegate mining address when the delegate flag is
+	// set.
+	if cfg.Delegate && len(cfg.DelegateAddrs) == 0 {
+		str := "%s: the delegate flag is set, but there are no delegate mining " +
 			"addresses specified "
 		err := fmt.Errorf(str, funcName)
 		fmt.Fprintln(os.Stderr, err)

@@ -2,8 +2,8 @@ package socketclient
 
 import (
 	"fmt"
-	"github.com/btcsuite/btcd/socketserver"
 	"github.com/btcsuite/btcd/websocketserver"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/cmcoffee/go-ezipc"
 	"github.com/gorilla/websocket"
 )
@@ -26,7 +26,7 @@ func NewSocketClient(websocketserver *websocketserver.WebsocketServer) *SocketCl
 
 func (s *SocketClient) Connect() {
 
-	err := s.cl.RegisterName("ForwardHeader", s.ForwardHeader)
+	err := s.cl.RegisterName("ReturnHeaderProblem", s.ReturnHeaderProblem)
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -47,28 +47,35 @@ func (s *SocketClient) Connect() {
 
 }
 
-func (s *SocketClient) RequestHeader(message *websocketserver.MinerMessage, conn *websocket.Conn) {
+func (s *SocketClient) RequestHeaderProblem(request *wire.HeaderProblemRequest, conn *websocket.Conn) {
 
 	// store request
-	s.requests[message.Address] = conn
+	s.requests[request.Address] = conn
 
-	err := s.cl.Call("RequestHeader", message.Address, nil)
+	err := s.cl.Call("RequestHeaderProblem", *request, nil)
 	if err != nil {
-		fmt.Printf("RequestHeader Call failed: %s\n", err)
+		fmt.Printf("RequestHeaderProblem Call failed: %s\n", err)
 		return
 	}
-
 }
 
-func (s *SocketClient) ForwardHeader(message socketserver.HeaderMessage, unused *int) error {
-	fmt.Printf("SendHeader %v\n", message)
-	s.websocketserver.ForwardHeader(message, s.requests[message.Address])
+func (s *SocketClient) ProvideHeaderSolution(headerSolution *wire.HeaderSolution, conn *websocket.Conn) {
+
+	// store request
+	s.requests[headerSolution.Address] = conn
+
+	err := s.cl.Call("ProvideHeaderSolution", *headerSolution, nil)
+	if err != nil {
+		fmt.Printf("ProvideHeaderSolution Call failed: %s\n", err)
+		return
+	}
+}
+
+func (s *SocketClient) ReturnHeaderProblem(headerProblem wire.HeaderProblemResponse, unused *int) error {
+	fmt.Printf("ReturnHeaderProblem %v\n", headerProblem)
+	s.websocketserver.SendHeaderProblem(&headerProblem, s.requests[headerProblem.Address])
 
 	// remove request
-	delete(s.requests, message.Address)
+	delete(s.requests, headerProblem.Address)
 	return nil
-}
-
-func (s *SocketClient) SolvedHash(message *websocketserver.MinerMessage, conn *websocket.Conn) {
-
 }

@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcd/btcutil"
 )
 
 const (
@@ -250,21 +250,30 @@ func standardCoinbaseScript(nextBlockHeight int32, extraNonce uint64) ([]byte, e
 //
 // See the comment for NewBlockTemplate for more information about why the nil
 // address handling is useful.
-func createCoinbaseTx(params *chaincfg.Params, coinbaseScript []byte, nextBlockHeight int32, addr btcutil.Address) (*btcutil.Tx, error) {
+func createCoinbaseTx(params *chaincfg.Params, coinbaseScript []byte, nextBlockHeight int32, addrReward btcutil.Address, addrCommission btcutil.Address) (*btcutil.Tx, error) {
 	// Create the script to pay to the provided payment address if one was
 	// specified.  Otherwise create a script that allows the coinbase to be
 	// redeemable by anyone.
-	var pkScript []byte
-	if addr != nil {
+	var pkScriptReward []byte
+	var pkScriptCommission []byte
+	if addrReward != nil {
 		var err error
-		pkScript, err = txscript.PayToAddrScript(addr)
+
+		pkScriptReward, err = txscript.PayToAddrScript(addrReward)
 		if err != nil {
 			return nil, err
+		}
+
+		if addrCommission != nil {
+			pkScriptCommission, err = txscript.PayToAddrScript(addrCommission)
+			if err != nil {
+				return nil, err
+			}
 		}
 	} else {
 		var err error
 		scriptBuilder := txscript.NewScriptBuilder()
-		pkScript, err = scriptBuilder.AddOp(txscript.OP_TRUE).Script()
+		pkScriptReward, err = scriptBuilder.AddOp(txscript.OP_TRUE).Script()
 		if err != nil {
 			return nil, err
 		}
@@ -279,10 +288,26 @@ func createCoinbaseTx(params *chaincfg.Params, coinbaseScript []byte, nextBlockH
 		SignatureScript: coinbaseScript,
 		Sequence:        wire.MaxTxInSequenceNum,
 	})
-	tx.AddTxOut(&wire.TxOut{
-		Value:    blockchain.CalcBlockSubsidy(nextBlockHeight, params),
-		PkScript: pkScript,
-	})
+
+	totalAmount := blockchain.CalcBlockSubsidy(nextBlockHeight, params)
+	commissionAmount := totalAmount / 100
+	rewardAmount := totalAmount - commissionAmount
+
+	if addrReward != nil && addrCommission != nil {
+		tx.AddTxOut(&wire.TxOut{
+			Value:    rewardAmount,
+			PkScript: pkScriptReward,
+		})
+		tx.AddTxOut(&wire.TxOut{
+			Value:    commissionAmount,
+			PkScript: pkScriptCommission,
+		})
+	} else {
+		tx.AddTxOut(&wire.TxOut{
+			Value:    totalAmount,
+			PkScript: pkScriptReward,
+		})
+	}
 	return btcutil.NewTx(tx), nil
 }
 
@@ -440,7 +465,7 @@ func NewBlkTmplGenerator(policy *Policy, params *chaincfg.Params,
 //  |  transactions (while block size   |   |
 //  |  <= policy.BlockMinSize)          |   |
 //   -----------------------------------  --
-func (g *BlkTmplGenerator) NewBlockTemplate(payToAddress btcutil.Address) (*BlockTemplate, error) {
+func (g *BlkTmplGenerator) NewBlockTemplate(payToAddressReward btcutil.Address, payToAddressCommission btcutil.Address) (*BlockTemplate, error) {
 	// Extend the most recently known best block.
 	best := g.chain.BestSnapshot()
 	nextBlockHeight := best.Height + 1
@@ -459,7 +484,7 @@ func (g *BlkTmplGenerator) NewBlockTemplate(payToAddress btcutil.Address) (*Bloc
 		return nil, err
 	}
 	coinbaseTx, err := createCoinbaseTx(g.chainParams, coinbaseScript,
-		nextBlockHeight, payToAddress)
+		nextBlockHeight, payToAddressReward, payToAddressCommission)
 	if err != nil {
 		return nil, err
 	}
@@ -857,7 +882,7 @@ mempoolLoop:
 		Fees:              txFees,
 		SigOpCosts:        txSigOpCosts,
 		Height:            nextBlockHeight,
-		ValidPayAddress:   payToAddress != nil,
+		ValidPayAddress:   payToAddressReward != nil,
 		WitnessCommitment: witnessCommitment,
 	}, nil
 }
