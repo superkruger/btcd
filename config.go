@@ -951,7 +951,7 @@ func loadConfig() (*config, []string, error) {
 	// Check delegate mining addresses are valid and saved parsed versions.
 	cfg.delegateAddrs = make([]btcutil.Address, 0, len(cfg.DelegateAddrs))
 	for _, strAddr := range cfg.DelegateAddrs {
-		addr, err := btcutil.DecodeAddress(strAddr, ActiveNetParams.Params)
+		addr, err := btcutil.DecodeAddress(strAddr, activeNetParams.Params)
 		if err != nil {
 			str := "%s: delegate mining address '%s' failed to decode: %v"
 			err := fmt.Errorf(str, funcName, strAddr, err)
@@ -959,7 +959,7 @@ func loadConfig() (*config, []string, error) {
 			fmt.Fprintln(os.Stderr, usageMessage)
 			return nil, nil, err
 		}
-		if !addr.IsForNet(ActiveNetParams.Params) {
+		if !addr.IsForNet(activeNetParams.Params) {
 			str := "%s: delegate mining address '%s' is on the wrong network"
 			err := fmt.Errorf(str, funcName, strAddr)
 			fmt.Fprintln(os.Stderr, err)
