@@ -7,18 +7,23 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"os"
 	"syscall/js"
+	"time"
 )
 
 const (
 	// maxNonce is the maximum value a nonce can be in a block header.
-	maxNonce = 1000000 //^uint32(0) // 2^32 - 1
+	maxNonce = ^uint32(0) // 2^32 - 1
 )
 
 func main() {
 	argsWithoutProg := os.Args[1:]
 	fmt.Println("Golang arguments: ", argsWithoutProg)
 
+	start := time.Now()
 	solved, res := calculateHash(([]byte)(argsWithoutProg[0]))
+	end := time.Now()
+
+	fmt.Println("Hashing completed in", end.Sub(start))
 
 	js.Global().Call("HashResult", solved, res)
 }

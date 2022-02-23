@@ -2393,9 +2393,12 @@ func (s *server) Start() {
 	// Start the CPU miner if generation is enabled.
 	if cfg.Generate {
 		s.cpuMiner.Start()
-		if cfg.Delegate {
-			s.delegateMiner.Start()
-		}
+	}
+
+	// Start the Delegate miner if generation is enabled.
+	fmt.Println("Delegating", cfg.Delegate)
+	if cfg.Delegate {
+		s.delegateMiner.Start()
 	}
 }
 
@@ -2843,7 +2846,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	s.delegateMiner = delegateminer.New(&delegateminer.Config{
 		ChainParams:            chainParams,
 		BlockTemplateGenerator: blockTemplateGenerator,
-		DelegateAddrs:          cfg.delegateAddrs,
+		CommissionAddrs:        cfg.commissionAddrs,
 		ProcessBlock:           s.syncManager.ProcessBlock,
 		ConnectedCount:         s.ConnectedCount,
 		IsCurrent:              s.syncManager.IsCurrent,

@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/database"
 	"github.com/btcsuite/btcd/mempool"
 	peerpkg "github.com/btcsuite/btcd/peer"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/btcsuite/btcd/btcutil"
 )
 
 const (
@@ -426,7 +426,7 @@ func (sm *SyncManager) handleNewPeerMsg(peer *peerpkg.Peer) {
 		return
 	}
 
-	log.Infof("New valid peer %s (%s)", peer, peer.UserAgent())
+	log.Debugf("New valid peer %s (%s)", peer, peer.UserAgent())
 
 	// Initialize the peer state
 	isSyncCandidate := sm.isSyncCandidate(peer)
@@ -509,7 +509,7 @@ func (sm *SyncManager) handleDonePeerMsg(peer *peerpkg.Peer) {
 	// Remove the peer from the list of candidate peers.
 	delete(sm.peerStates, peer)
 
-	log.Infof("Lost peer %s", peer)
+	log.Debugf("Lost peer %s", peer)
 
 	sm.clearRequestedState(state)
 

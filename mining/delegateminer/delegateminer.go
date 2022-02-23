@@ -39,14 +39,10 @@ type Config struct {
 	// generate block templates that the miner will attempt to solve.
 	BlockTemplateGenerator *mining.BlkTmplGenerator
 
-	// MiningAddrs is a list of payment addresses to use for the generated
-	// blocks.  Each generated block will randomly choose one of them.
-	MiningAddrs []btcutil.Address
-
-	// DelegateAddrs is a list of payment addresses to use for the generated
+	// CommissionAddrs is a list of payment addresses to use for the generated
 	// blocks in the delegate miner.
 	// Each generated block will randomly choose one of them.
-	DelegateAddrs []btcutil.Address
+	CommissionAddrs []btcutil.Address
 
 	// ProcessBlock defines the function to call with any solved blocks.
 	// It typically must run the provided block through the same set of
@@ -114,6 +110,8 @@ func (m *DelegateMiner) submitBlock(block *btcutil.Block) bool {
 	m.submitBlockLock.Lock()
 	defer m.submitBlockLock.Unlock()
 
+	log.Infof("Submitting solved block: %v", block.MsgBlock().Header)
+
 	// Ensure the block is not stale since a new block could have shown up
 	// while the solution was being found.  Typically that condition is
 	// detected and all work on the stale block is halted to start work on
@@ -121,7 +119,7 @@ func (m *DelegateMiner) submitBlock(block *btcutil.Block) bool {
 	// possible a block was found and submitted in between.
 	msgBlock := block.MsgBlock()
 	if !msgBlock.Header.PrevBlock.IsEqual(&m.g.BestSnapshot().Hash) {
-		log.Debugf("Block submitted via CPU miner with previous "+
+		log.Warnf("Block submitted via CPU miner with previous "+
 			"block %s is stale", msgBlock.Header.PrevBlock)
 		return false
 	}
@@ -134,21 +132,21 @@ func (m *DelegateMiner) submitBlock(block *btcutil.Block) bool {
 		// so log that error as an internal error.
 		if _, ok := err.(blockchain.RuleError); !ok {
 			log.Errorf("Unexpected error while processing "+
-				"block submitted via CPU miner: %v", err)
+				"block submitted via Delegate miner: %v", err)
 			return false
 		}
 
-		log.Debugf("Block submitted via CPU miner rejected: %v", err)
+		log.Warnf("Block submitted via Delegate miner rejected: %v", err)
 		return false
 	}
 	if isOrphan {
-		log.Debugf("Block submitted via CPU miner is an orphan")
+		log.Warnf("Block submitted via Delegate miner is an orphan")
 		return false
 	}
 
 	// The block was accepted.
 	coinbaseTx := block.MsgBlock().Transactions[0].TxOut[0]
-	log.Infof("Block submitted via CPU miner accepted (hash %s, "+
+	log.Infof("Block submitted via Delegate miner accepted (hash %s, "+
 		"amount %v)", block.Hash(), btcutil.Amount(coinbaseTx.Value))
 	return true
 }
@@ -251,6 +249,7 @@ func (m *DelegateMiner) decodeAddress(address string) (btcutil.Address, error) {
 }
 
 func (m *DelegateMiner) getCurrentBlockHeight() (int32, error) {
+	log.Infof("getCurrentBlockHeight")
 
 	// Wait until there is a connection to at least one other peer
 	// since there is no way to relay a found block or receive
@@ -275,6 +274,7 @@ func (m *DelegateMiner) getCurrentBlockHeight() (int32, error) {
 }
 
 func (m *DelegateMiner) getClientsBlocks(address string, blockHeight int32) *ClientsBlocks {
+	log.Infof("getClientsBlocks for %v at height %v", address, blockHeight)
 	m.solvingBlocksLock.Lock()
 	defer m.solvingBlocksLock.Unlock()
 
@@ -291,6 +291,24 @@ func (m *DelegateMiner) getClientsBlocks(address string, blockHeight int32) *Cli
 	return clientsBlocks
 }
 
+func (m *DelegateMiner) addClientsBlocks(clientsBlocks *ClientsBlocks, address string, blockHeight int32) {
+	log.Infof("addClientsBlocks for %v", address)
+	m.solvingBlocksLock.Lock()
+	defer m.solvingBlocksLock.Unlock()
+
+	solvingBlocks := m.solvingBlocks[blockHeight]
+	if solvingBlocks == nil {
+		solvingBlocks = &SolvingBlocks{
+			clientsBlocks: make(map[string]*ClientsBlocks),
+		}
+		m.solvingBlocks[blockHeight] = solvingBlocks
+	}
+
+	solvingBlocks.clientsBlocksLock.Lock()
+	defer solvingBlocks.clientsBlocksLock.Unlock()
+
+	solvingBlocks.clientsBlocks[address] = clientsBlocks
+}
 func (m *DelegateMiner) isClientsBlocksCurrent(clientsBlocks *ClientsBlocks) bool {
 	best := m.g.BestSnapshot()
 
@@ -314,11 +332,12 @@ func (m *DelegateMiner) isClientsBlocksCurrent(clientsBlocks *ClientsBlocks) boo
 	return true
 }
 
-func (m *DelegateMiner) newClientsBlocksProblem(address string, blockHeight int32) (*ClientsBlocks, error) {
+func (m *DelegateMiner) newClientsBlocksProblem(address string) (*ClientsBlocks, error) {
+	log.Infof("newClientsBlocksProblem for %v", address)
 
 	// Choose a commission address at random.
 	rand.Seed(time.Now().UnixNano())
-	commissionAddr := m.cfg.DelegateAddrs[rand.Intn(len(m.cfg.DelegateAddrs))]
+	commissionAddr := m.cfg.CommissionAddrs[rand.Intn(len(m.cfg.CommissionAddrs))]
 
 	delegateAddress, err := m.decodeAddress(address)
 	if err != nil {
@@ -349,6 +368,7 @@ func (m *DelegateMiner) newClientsBlocksProblem(address string, blockHeight int3
 }
 
 func (m *DelegateMiner) updateClientsBlocksProblem(clientsBlocks *ClientsBlocks, blockHeight int32) error {
+	log.Infof("updateClientsBlocksProblem at height %v", blockHeight)
 	clientsBlocks.clientBlocksLock.Lock()
 	defer clientsBlocks.clientBlocksLock.Unlock()
 
@@ -369,15 +389,14 @@ func (m *DelegateMiner) GetHeaderProblem(request *wire.HeaderProblemRequest) (*w
 		return nil, err
 	}
 	nextHeight := curHeight + 1
-	var solvingBlocks *SolvingBlocks
 
 	clientsBlocks := m.getClientsBlocks(request.Address, nextHeight)
 	if clientsBlocks == nil || !m.isClientsBlocksCurrent(clientsBlocks) {
-		clientsBlocks, err = m.newClientsBlocksProblem(request.Address, nextHeight)
+		clientsBlocks, err = m.newClientsBlocksProblem(request.Address)
 		if err != nil {
 			return nil, err
 		}
-		solvingBlocks.clientsBlocks[request.Address] = clientsBlocks
+		m.addClientsBlocks(clientsBlocks, request.Address, nextHeight)
 	} else {
 		err := m.updateClientsBlocksProblem(clientsBlocks, nextHeight)
 		if err != nil {
@@ -419,6 +438,8 @@ func (m *DelegateMiner) SetHeaderSolution(solution *wire.HeaderSolution) error {
 	if !m.submitBlock(block) {
 		return errors.New("block submit failed")
 	}
+
+	solution.BlockHash = block.Hash().String()
 
 	return nil
 }

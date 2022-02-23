@@ -57,6 +57,12 @@ func (s *SocketServer) Start(headerProvider HeaderProvider) {
 		return
 	}
 
+	err = s.cl.RegisterName("ProvideHeaderSolution", s.ProvideHeaderSolution)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
 	fmt.Println("Listening for requests!")
 	//
 	//n := BlockHeader{Nonce: uint32(99999), Bits: uint32(7777777)}
@@ -75,28 +81,6 @@ func (s *SocketServer) Start(headerProvider HeaderProvider) {
 		fmt.Printf("Connection Error: %s\n", err)
 		return
 	}
-}
-
-func (s *SocketServer) Send(b *wire.BlockHeader, extraNonce uint64) {
-
-	headerMessage := HeaderMessage{
-		Header:     *b,
-		ExtraNonce: extraNonce,
-	}
-
-	//err := s.myKV.Set(extraNonce, b)
-	err := s.cl.Call("SendHeader", 0, &headerMessage)
-	if err != nil {
-		fmt.Printf("Call failed: %s\n", err)
-		return
-	}
-
-	//err = s.cl.Call("Ping", 0, extraNonce)
-	//if err != nil {
-	//	fmt.Printf("Ping failed: %s\n", err)
-	//	return
-	//}
-
 }
 
 func (s *SocketServer) Ready() chan bool {
@@ -133,11 +117,11 @@ func (s *SocketServer) ProvideHeaderSolution(solution wire.HeaderSolution, unuse
 		return err
 	}
 
-	//err = s.cl.Call("ReturnHeaderProblem", *headerProblem, nil)
-	//if err != nil {
-	//	fmt.Printf("ForwardHeader Call failed: %s\n", err)
-	//	return err
-	//}
+	err = s.cl.Call("ReturnHeaderSolution", solution, nil)
+	if err != nil {
+		fmt.Printf("ReturnHeaderSolution Call failed: %s\n", err)
+		return err
+	}
 
 	return nil
 }

@@ -32,6 +32,12 @@ func (s *SocketClient) Connect() {
 		return
 	}
 
+	err = s.cl.RegisterName("ReturnHeaderSolution", s.ReturnHeaderSolution)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
 	fmt.Println("Opening socket file...")
 
 	err = s.cl.Dial("/tmp/blab.sock")
@@ -47,7 +53,7 @@ func (s *SocketClient) Connect() {
 
 }
 
-func (s *SocketClient) RequestHeaderProblem(request *wire.HeaderProblemRequest, conn *websocket.Conn) {
+func (s *SocketClient) RequestHeaderProblem(request *wire.HeaderProblemRequest, conn *websocket.Conn) error {
 
 	// store request
 	s.requests[request.Address] = conn
@@ -55,11 +61,12 @@ func (s *SocketClient) RequestHeaderProblem(request *wire.HeaderProblemRequest, 
 	err := s.cl.Call("RequestHeaderProblem", *request, nil)
 	if err != nil {
 		fmt.Printf("RequestHeaderProblem Call failed: %s\n", err)
-		return
+		return err
 	}
+	return nil
 }
 
-func (s *SocketClient) ProvideHeaderSolution(headerSolution *wire.HeaderSolution, conn *websocket.Conn) {
+func (s *SocketClient) ProvideHeaderSolution(headerSolution *wire.HeaderSolution, conn *websocket.Conn) error {
 
 	// store request
 	s.requests[headerSolution.Address] = conn
@@ -67,8 +74,9 @@ func (s *SocketClient) ProvideHeaderSolution(headerSolution *wire.HeaderSolution
 	err := s.cl.Call("ProvideHeaderSolution", *headerSolution, nil)
 	if err != nil {
 		fmt.Printf("ProvideHeaderSolution Call failed: %s\n", err)
-		return
+		return err
 	}
+	return nil
 }
 
 func (s *SocketClient) ReturnHeaderProblem(headerProblem wire.HeaderProblemResponse, unused *int) error {
@@ -77,5 +85,14 @@ func (s *SocketClient) ReturnHeaderProblem(headerProblem wire.HeaderProblemRespo
 
 	// remove request
 	delete(s.requests, headerProblem.Address)
+	return nil
+}
+
+func (s *SocketClient) ReturnHeaderSolution(headerSolution wire.HeaderSolution, unused *int) error {
+	fmt.Printf("ReturnHeaderSolution %v\n", headerSolution)
+	s.websocketserver.SendHeaderSolution(&headerSolution, s.requests[headerSolution.Address])
+
+	// remove request
+	delete(s.requests, headerSolution.Address)
 	return nil
 }
