@@ -7,6 +7,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/btcsuite/btcd/mining/delegateminer"
 	"os"
 	"path/filepath"
 
@@ -80,6 +81,7 @@ func init() {
 	indexers.UseLogger(indxLog)
 	mining.UseLogger(minrLog)
 	cpuminer.UseLogger(minrLog)
+	delegateminer.UseLogger(minrLog)
 	peer.UseLogger(peerLog)
 	txscript.UseLogger(scrpLog)
 	netsync.UseLogger(syncLog)

@@ -1,28 +1,27 @@
-package websocketserver
+package main
 
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/btcsuite/btcd/mining/delegateminer"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/gorilla/websocket"
 	"log"
 	"net/http"
 )
 
-type Config struct {
-	SSL  bool   `short:"s" long:"ssl" description:"Run socket server with ssl"`
-	Port string `short:"p" long:"port" description:"Socket port. Default 80, or 443 if SSL"`
-}
-
-type HeaderClient interface {
-	RequestHeaderProblem(request *wire.HeaderProblemRequest, conn *websocket.Conn) error
-	ProvideHeaderSolution(headerSolution *wire.HeaderSolution, conn *websocket.Conn) error
+type HeaderProvider interface {
+	SetHeaderSender(headerSender delegateminer.HeaderSender)
+	SocketClosed(conn *websocket.Conn) error
+	GetHeaderProblem(request *wire.HeaderProblemRequest, conn *websocket.Conn) error
+	SetHeaderSolution(solution *wire.HeaderSolution, conn *websocket.Conn) error
+	StopMining(conn *websocket.Conn) error
 }
 
 type WebsocketServer struct {
-	config       *Config
-	upgrader     websocket.Upgrader
-	headerclient HeaderClient
+	config         *config
+	upgrader       websocket.Upgrader
+	headerProvider HeaderProvider
 	//conn         []*websocket.Conn
 }
 
@@ -32,7 +31,7 @@ type MinerMessage struct {
 	Nonce           uint32
 	ExtraNonce      uint64
 	BlockHeight     int32
-	HashesPerSecond int32
+	HashesCompleted uint64
 }
 
 func (s *WebsocketServer) socketHandler(w http.ResponseWriter, r *http.Request) {
@@ -68,41 +67,48 @@ func (s *WebsocketServer) socketHandler(w http.ResponseWriter, r *http.Request) 
 
 		switch minerMessage.Type {
 		case "REQUEST":
-			log.Println("REQUEST received")
+			log.Println("REQUEST received", minerMessage)
 			headerProblemRequest := wire.HeaderProblemRequest{
 				Address:         minerMessage.Address,
 				BlockHeight:     minerMessage.BlockHeight,
-				HashesPerSecond: minerMessage.HashesPerSecond,
+				HashesCompleted: minerMessage.HashesCompleted,
 			}
-			err := s.headerclient.RequestHeaderProblem(&headerProblemRequest, conn)
+			err := s.headerProvider.GetHeaderProblem(&headerProblemRequest, conn)
 			if err != nil {
-				log.Println("Error (RequestHeaderProblem)", err)
+				log.Println("Error (GetHeaderProblem)", err)
+			}
+			break
+		case "STOP":
+			log.Println("STOP received", minerMessage)
+			err := s.headerProvider.StopMining(conn)
+			if err != nil {
+				log.Println("Error (StopMining)", err)
 			}
 			break
 		case "SOLVED":
-			log.Println("SOLVED received")
+			log.Println("SOLVED received", minerMessage)
 			headerSolution := wire.HeaderSolution{
 				Address:     minerMessage.Address,
 				Nonce:       minerMessage.Nonce,
 				ExtraNonce:  minerMessage.ExtraNonce,
 				BlockHeight: minerMessage.BlockHeight,
 			}
-			err := s.headerclient.ProvideHeaderSolution(&headerSolution, conn)
+			err := s.headerProvider.SetHeaderSolution(&headerSolution, conn)
 			if err != nil {
-				log.Println("Error (ProvideHeaderSolution)", err)
+				log.Println("Error (SetHeaderSolution)", err)
+			} else {
+				s.SendHeaderSolution(&headerSolution, conn)
 			}
 			break
 		default:
 			log.Println("Unknown message type", minerMessage.Type)
 		}
-
-		//err = conn.WriteMessage(messageType, message)
-		//if err != nil {
-		//	log.Println("Error during message writing:", err)
-		//	break
-		//}
 	}
 
+	err = s.headerProvider.SocketClosed(conn)
+	if err != nil {
+		log.Printf("Could not close delegate socket %v", err)
+	}
 	log.Println("closing websocket handler...")
 }
 
@@ -115,45 +121,51 @@ func (s *WebsocketServer) closeConn(conn *websocket.Conn) {
 	// TODO remove from array
 }
 
-func (s *WebsocketServer) SendHeaderProblem(headerProblem *wire.HeaderProblemResponse, conn *websocket.Conn) {
+func (s *WebsocketServer) SendHeaderProblem(headerProblem *wire.HeaderProblemResponse, conn *websocket.Conn) error {
 
 	headerProblem.Type = "PROBLEM"
 	jsonMessage, err := json.Marshal(headerProblem)
 	if err != nil {
 		log.Println("Error during message marshalling:", err)
-		return
+		return err
 	}
 
 	err = conn.WriteMessage(websocket.TextMessage, jsonMessage)
 	if err != nil {
 		log.Println("Error during message writing:", err)
+		return err
 	}
+	return nil
 }
 
-func (s *WebsocketServer) SendHeaderSolution(headerSolution *wire.HeaderSolution, conn *websocket.Conn) {
+func (s *WebsocketServer) SendHeaderSolution(headerSolution *wire.HeaderSolution, conn *websocket.Conn) error {
 
 	headerSolution.Type = "SOLUTION"
 	jsonMessage, err := json.Marshal(headerSolution)
 	if err != nil {
 		log.Println("Error during message marshalling:", err)
-		return
+		return err
 	}
 
 	err = conn.WriteMessage(websocket.TextMessage, jsonMessage)
 	if err != nil {
 		log.Println("Error during message writing:", err)
+		return err
 	}
+
+	return nil
 }
 
-func (s *WebsocketServer) Start(headerclient HeaderClient) {
-	s.headerclient = headerclient
+func (s *WebsocketServer) Start(headerProvider HeaderProvider) {
+	s.headerProvider = headerProvider
+	s.headerProvider.SetHeaderSender(s)
 
 	fmt.Println("Starting WebsocketServer...")
 	http.HandleFunc("/socket", s.socketHandler)
 	http.HandleFunc("/", s.home)
 
-	address := ":" + s.config.Port
-	if s.config.SSL {
+	address := ":" + s.config.WSS_Port
+	if s.config.WSS_SSL {
 		log.Fatal(http.ListenAndServeTLS(
 			address,
 			"/etc/letsencrypt/live/api.decentravest.com/fullchain.pem",
@@ -164,7 +176,11 @@ func (s *WebsocketServer) Start(headerclient HeaderClient) {
 	}
 }
 
-func NewWebsocketServer(config *Config) *WebsocketServer {
+func (s *WebsocketServer) Stop() {
+
+}
+
+func NewWebsocketServer(config *config) *WebsocketServer {
 	return &WebsocketServer{
 		config:   config,
 		upgrader: websocket.Upgrader{},

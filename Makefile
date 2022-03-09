@@ -74,15 +74,12 @@ build:
 	$(GOBUILD) $(PKG)/cmd/gencerts
 	$(GOBUILD) $(PKG)/cmd/findcheckpoint
 	$(GOBUILD) $(PKG)/cmd/addblock
-	$(GOBUILD) $(PKG)/cmd/btcdweb
 	$(WASMBUILD) $(PKG)/wasm
 	$(GOBUILD_LINUX) $(PKG)
 	$(GOBUILD_LINUX) $(PKG)/cmd/btcctl
 	$(GOBUILD_LINUX) $(PKG)/cmd/gencerts
 	$(GOBUILD_LINUX) $(PKG)/cmd/findcheckpoint
 	$(GOBUILD_LINUX) $(PKG)/cmd/addblock
-	$(GOBUILD_LINUX) $(PKG)/cmd/btcdweb
-	$(WASMBUILD_LINUX) $(PKG)/wasm
 
 # =======
 # TESTING

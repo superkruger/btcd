@@ -66,6 +66,8 @@ const (
 	sampleConfigFilename         = "sample-btcd.conf"
 	defaultTxIndex               = false
 	defaultAddrIndex             = false
+	defaultWssSSL                = false
+	defaultWssPort               = "8080"
 )
 
 var (
@@ -174,6 +176,8 @@ type config struct {
 	UserAgentComments    []string      `long:"uacomment" description:"Comment to add to the user agent -- See BIP 14 for more information."`
 	Upnp                 bool          `long:"upnp" description:"Use UPnP to map our listening port outside of NAT"`
 	ShowVersion          bool          `short:"V" long:"version" description:"Display version information and exit"`
+	WSS_SSL              bool          `long:"wss_ssl" description:"Run websocket server with ssl"`
+	WSS_Port             string        `long:"wss_port" description:"Websocket port. Default 8080, or 443 if SSL"`
 	Whitelists           []string      `long:"whitelist" description:"Add an IP network or IP that will not be banned. (eg. 192.168.1.0/24 or ::1)"`
 	lookup               func(string) ([]net.IP, error)
 	oniondial            func(string, string, time.Duration) (net.Conn, error)
@@ -442,6 +446,8 @@ func loadConfig() (*config, []string, error) {
 		Generate:             defaultGenerate,
 		TxIndex:              defaultTxIndex,
 		AddrIndex:            defaultAddrIndex,
+		WSS_SSL:              defaultWssSSL,
+		WSS_Port:             defaultWssPort,
 	}
 
 	// Service options which are only added on Windows.
@@ -459,6 +465,11 @@ func loadConfig() (*config, []string, error) {
 			fmt.Fprintln(os.Stderr, err)
 			return nil, nil, err
 		}
+	}
+
+	// Use default SSL port if not set, but SSL is active
+	if cfg.WSS_SSL && cfg.WSS_Port == "8080" {
+		cfg.WSS_Port = "443"
 	}
 
 	// Show the version and exit if the version flag was specified.

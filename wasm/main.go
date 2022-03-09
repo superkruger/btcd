@@ -6,6 +6,7 @@ import (
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/wire"
 	"os"
+	"strconv"
 	"syscall/js"
 	"time"
 )
@@ -19,8 +20,20 @@ func main() {
 	argsWithoutProg := os.Args[1:]
 	fmt.Println("Golang arguments: ", argsWithoutProg)
 
+	i, err := strconv.ParseInt(argsWithoutProg[1], 10, 32)
+	if err != nil {
+		fmt.Errorf("start nonce could not be parsed")
+	}
+	startNonce := uint32(i)
+
+	i, err = strconv.ParseInt(argsWithoutProg[2], 10, 32)
+	if err != nil {
+		fmt.Errorf("end nonce could not be parsed")
+	}
+	endNonce := uint32(i)
+
 	start := time.Now()
-	solved, res := calculateHash(([]byte)(argsWithoutProg[0]))
+	solved, res := calculateHash(([]byte)(argsWithoutProg[0]), startNonce, endNonce)
 	end := time.Now()
 
 	fmt.Println("Hashing completed in", end.Sub(start))
@@ -28,7 +41,7 @@ func main() {
 	js.Global().Call("HashResult", solved, res)
 }
 
-func calculateHash(jsonHeader []byte) (bool, uint32) {
+func calculateHash(jsonHeader []byte, startNonce uint32, endNonce uint32) (bool, uint32) {
 
 	blockHeader := wire.BlockHeader{}
 	err := json.Unmarshal(jsonHeader, &blockHeader)
@@ -39,10 +52,11 @@ func calculateHash(jsonHeader []byte) (bool, uint32) {
 
 	targetDifficulty := *blockchain.CompactToBig(blockHeader.Bits)
 
-	fmt.Printf("header %d\n", blockHeader.Version)
+	fmt.Printf("header %d, start %d, end %d\n", blockHeader.Version, startNonce, endNonce)
 	fmt.Printf("targetDifficulty %d\n", blockHeader.Bits)
 
-	for i := uint32(0); i <= maxNonce; i++ {
+	i := startNonce
+	for ; i <= endNonce; i++ {
 		blockHeader.Nonce = i
 		headerHash := blockHeader.BlockHash()
 
@@ -51,6 +65,10 @@ func calculateHash(jsonHeader []byte) (bool, uint32) {
 
 			return true, i
 		}
+
+		//if i%1000000 == 0 {
+		//	fmt.Println("Hashed", i, time.Now())
+		//}
 	}
-	return false, 0
+	return false, i - startNonce
 }

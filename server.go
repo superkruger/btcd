@@ -216,7 +216,6 @@ type server struct {
 	chain                *blockchain.BlockChain
 	txMemPool            *mempool.TxPool
 	cpuMiner             *cpuminer.CPUMiner
-	delegateMiner        *delegateminer.DelegateMiner
 	modifyRebroadcastInv chan interface{}
 	newPeers             chan *serverPeer
 	donePeers            chan *serverPeer
@@ -231,6 +230,8 @@ type server struct {
 	db                   database.DB
 	timeSource           blockchain.MedianTimeSource
 	services             wire.ServiceFlag
+	delegateMiner        *delegateminer.DelegateMiner
+	websocketServer      *WebsocketServer
 
 	// The following fields are used for optional indexes.  They will be nil
 	// if the associated index is not enabled.  These fields are set during
@@ -2399,6 +2400,7 @@ func (s *server) Start() {
 	fmt.Println("Delegating", cfg.Delegate)
 	if cfg.Delegate {
 		s.delegateMiner.Start()
+		go s.websocketServer.Start(s.delegateMiner)
 	}
 }
 
@@ -2415,6 +2417,9 @@ func (s *server) Stop() error {
 
 	// Stop the CPU miner if needed
 	s.cpuMiner.Stop()
+
+	// Stop the websocket server
+	s.websocketServer.Stop()
 
 	// Stop the Delegate miner if needed
 	s.delegateMiner.Stop()
@@ -2851,6 +2856,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 		ConnectedCount:         s.ConnectedCount,
 		IsCurrent:              s.syncManager.IsCurrent,
 	})
+	s.websocketServer = NewWebsocketServer(cfg)
 
 	// Only setup a function to return new addresses to connect to when
 	// not running in connect-only mode.  The simulation network is always

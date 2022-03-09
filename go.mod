@@ -8,12 +8,12 @@ require (
 	github.com/btcsuite/goleveldb v1.0.0
 	github.com/btcsuite/websocket v0.0.0-20150119174127-31079b680792
 	github.com/btcsuite/winsvc v1.0.0
-	github.com/cmcoffee/go-ezipc v0.0.0-20171130154705-46e9a04ab1ea
 	github.com/davecgh/go-spew v1.1.1
 	github.com/decred/dcrd/lru v1.0.0
 	github.com/gorilla/websocket v1.4.2
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/jrick/logrotate v1.0.0
+	github.com/mattn/go-sqlite3 v1.14.12
 	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
 )
 

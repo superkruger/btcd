@@ -1,17 +1,17 @@
 package wire
 
+type HeaderProblemRequest struct {
+	Address         string
+	BlockHeight     int32
+	HashesCompleted uint64
+}
+
 type HeaderProblemResponse struct {
 	Type        string
 	Header      BlockHeader
 	Address     string
 	BlockHeight int32
 	ExtraNonce  uint64
-}
-
-type HeaderProblemRequest struct {
-	Address         string
-	BlockHeight     int32
-	HashesCompleted uint64
 }
 
 type HeaderSolution struct {
