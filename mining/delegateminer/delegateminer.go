@@ -614,6 +614,17 @@ func (m *DelegateMiner) GetHeaderProblem(request *wire.HeaderProblemRequest, con
 	return nil
 }
 
+func (m *DelegateMiner) ReportHashes(request *wire.HashesRequest, conn *websocket.Conn) error {
+
+	delegateWorker := m.delegateWorkers[conn]
+	if delegateWorker == nil {
+		return fmt.Errorf("ReportHashes no delegate worker found for connection")
+	}
+
+	delegateWorker.hashesCompleted = delegateWorker.hashesCompleted + request.HashesCompleted
+	return nil
+}
+
 func (m *DelegateMiner) SetHeaderSolution(solution *wire.HeaderSolution, conn *websocket.Conn) error {
 
 	m.delegateWorkersLock.Lock()

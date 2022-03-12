@@ -70,5 +70,5 @@ func calculateHash(jsonHeader []byte, startNonce uint32, endNonce uint32) (bool,
 		//	fmt.Println("Hashed", i, time.Now())
 		//}
 	}
-	return false, i - startNonce
+	return false, i
 }

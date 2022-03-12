@@ -14,6 +14,10 @@ type HeaderProblemResponse struct {
 	ExtraNonce  uint64
 }
 
+type HashesRequest struct {
+	HashesCompleted uint64
+}
+
 type HeaderSolution struct {
 	Type        string
 	Address     string

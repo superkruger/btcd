@@ -14,6 +14,7 @@ type HeaderProvider interface {
 	SetHeaderSender(headerSender delegateminer.HeaderSender)
 	SocketClosed(conn *websocket.Conn) error
 	GetHeaderProblem(request *wire.HeaderProblemRequest, conn *websocket.Conn) error
+	ReportHashes(request *wire.HashesRequest, conn *websocket.Conn) error
 	SetHeaderSolution(solution *wire.HeaderSolution, conn *websocket.Conn) error
 	StopMining(conn *websocket.Conn) error
 }
@@ -81,6 +82,16 @@ func (s *WebsocketServer) socketHandler(w http.ResponseWriter, r *http.Request) 
 		case "STOP":
 			log.Println("STOP received", minerMessage)
 			err := s.headerProvider.StopMining(conn)
+			if err != nil {
+				log.Println("Error (StopMining)", err)
+			}
+			break
+		case "HASHES":
+			log.Println("HASHES received", minerMessage)
+			hashesRequest := wire.HashesRequest{
+				HashesCompleted: minerMessage.HashesCompleted,
+			}
+			err := s.headerProvider.ReportHashes(&hashesRequest, conn)
 			if err != nil {
 				log.Println("Error (StopMining)", err)
 			}
