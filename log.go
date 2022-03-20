@@ -70,6 +70,7 @@ var (
 	srvrLog = backendLog.Logger("SRVR")
 	syncLog = backendLog.Logger("SYNC")
 	txmpLog = backendLog.Logger("TXMP")
+	dlgmLog = backendLog.Logger("DLGM")
 )
 
 // Initialize package-global logger variables.
@@ -81,7 +82,7 @@ func init() {
 	indexers.UseLogger(indxLog)
 	mining.UseLogger(minrLog)
 	cpuminer.UseLogger(minrLog)
-	delegateminer.UseLogger(minrLog)
+	delegateminer.UseLogger(dlgmLog)
 	peer.UseLogger(peerLog)
 	txscript.UseLogger(scrpLog)
 	netsync.UseLogger(syncLog)
@@ -105,6 +106,7 @@ var subsystemLoggers = map[string]btclog.Logger{
 	"SRVR": srvrLog,
 	"SYNC": syncLog,
 	"TXMP": txmpLog,
+	"DLGM": dlgmLog,
 }
 
 // initLogRotator initializes the logging rotater to write logs to logFile and

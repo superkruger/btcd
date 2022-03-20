@@ -297,7 +297,7 @@ func (m *CPUMiner) solveBlock(msgBlock *wire.MsgBlock, blockHeight int32,
 //
 // It must be run as a goroutine.
 func (m *CPUMiner) generateBlocks(quit chan struct{}) {
-	log.Tracef("Starting generate blocks worker")
+	log.Infof("Starting generate blocks worker")
 
 	// Start a ticker which is used to signal checks for stale work and
 	// updates to the speed monitor.
@@ -349,6 +349,8 @@ out:
 			log.Errorf(errStr)
 			continue
 		}
+
+		log.Debugf("Solving new block template")
 
 		// Attempt to solve the block.  The function will exit early
 		// with false when conditions that trigger a stale block, so

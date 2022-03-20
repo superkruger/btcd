@@ -18,9 +18,9 @@ type Hashrate struct {
 	Hashrate   uint64
 }
 
-const file string = "hashrates.db"
+const file_hashrates string = "hashrates.db"
 
-const create string = `
+const create_hashrates string = `
   CREATE TABLE IF NOT EXISTS hashrates (
   	address TEXT NOT NULL,
     measured_at DATETIME NOT NULL,
@@ -30,11 +30,11 @@ const create string = `
     ON hashrates (address, measured_at);`
 
 func NewHashrates() (*Hashrates, error) {
-	db, err := sql.Open("sqlite3", file)
+	db, err := sql.Open("sqlite3", file_hashrates)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(create); err != nil {
+	if _, err := db.Exec(create_hashrates); err != nil {
 		return nil, err
 	}
 	return &Hashrates{

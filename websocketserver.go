@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/btcsuite/btcd/database/delegate"
 	"github.com/btcsuite/btcd/mining/delegateminer"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"log"
 	"net/http"
@@ -12,11 +14,11 @@ import (
 
 type HeaderProvider interface {
 	SetHeaderSender(headerSender delegateminer.HeaderSender)
-	SocketClosed(conn *websocket.Conn) error
-	GetHeaderProblem(request *wire.HeaderProblemRequest, conn *websocket.Conn) error
-	ReportHashes(request *wire.HashesRequest, conn *websocket.Conn) error
-	SetHeaderSolution(solution *wire.HeaderSolution, conn *websocket.Conn) error
-	StopMining(conn *websocket.Conn) error
+	SocketClosed(conn *websocket.Conn, wsId string) error
+	GetHeaderProblem(request *wire.HeaderProblemRequest, conn *websocket.Conn, wsId string) error
+	ReportHashes(request *wire.HashesRequest, conn *websocket.Conn, wsId string) error
+	SetHeaderSolution(solution *wire.HeaderSolution, conn *websocket.Conn, wsId string) error
+	StopMining(conn *websocket.Conn, wsId string) error
 }
 
 type WebsocketServer struct {
@@ -30,20 +32,21 @@ type MinerMessage struct {
 	Type            string
 	Address         string
 	Nonce           uint32
-	ExtraNonce      uint64
+	ExtraNonce      string
 	BlockHeight     int32
-	HashesCompleted uint64
+	HashesCompleted int32
 }
 
 func (s *WebsocketServer) socketHandler(w http.ResponseWriter, r *http.Request) {
-	log.Println("Socket handler")
+	wsId := uuid.NewString()
+	dlgmLog.Infof("Socket handler")
 
 	s.upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 	var err error
 
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Print("Error during connection upgradation:", err)
+		dlgmLog.Errorf("Error during connection upgradation: %v", err)
 		return
 	}
 	defer s.closeConn(conn)
@@ -54,73 +57,110 @@ func (s *WebsocketServer) socketHandler(w http.ResponseWriter, r *http.Request) 
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
-			log.Println("Error during message reading:", err)
+			dlgmLog.Errorf("Error during message reading: %v", err)
 			break
 		}
-		log.Printf("Received: %s", message)
+		dlgmLog.Debugf("Received: %s", message)
 
 		minerMessage := MinerMessage{}
 		err = json.Unmarshal(message, &minerMessage)
 		if err != nil {
-			log.Println("Error during message unmarshalling:", err)
+			dlgmLog.Errorf("Error during message unmarshalling: %v", err)
 			break
 		}
 
 		switch minerMessage.Type {
 		case "REQUEST":
-			log.Println("REQUEST received", minerMessage)
+			dlgmLog.Infof("REQUEST received %v", minerMessage)
 			headerProblemRequest := wire.HeaderProblemRequest{
 				Address:         minerMessage.Address,
 				BlockHeight:     minerMessage.BlockHeight,
 				HashesCompleted: minerMessage.HashesCompleted,
 			}
-			err := s.headerProvider.GetHeaderProblem(&headerProblemRequest, conn)
+			err := s.headerProvider.GetHeaderProblem(&headerProblemRequest, conn, wsId)
 			if err != nil {
-				log.Println("Error (GetHeaderProblem)", err)
+				dlgmLog.Errorf("Error (GetHeaderProblem) %v", err)
 			}
 			break
 		case "STOP":
-			log.Println("STOP received", minerMessage)
-			err := s.headerProvider.StopMining(conn)
+			dlgmLog.Infof("STOP received %v", minerMessage)
+			err := s.headerProvider.StopMining(conn, wsId)
 			if err != nil {
-				log.Println("Error (StopMining)", err)
+				dlgmLog.Errorf("Error (StopMining) %v", err)
 			}
 			break
 		case "HASHES":
-			log.Println("HASHES received", minerMessage)
+			dlgmLog.Debugf("HASHES received %v", minerMessage)
 			hashesRequest := wire.HashesRequest{
 				HashesCompleted: minerMessage.HashesCompleted,
 			}
-			err := s.headerProvider.ReportHashes(&hashesRequest, conn)
+			err := s.headerProvider.ReportHashes(&hashesRequest, conn, wsId)
 			if err != nil {
-				log.Println("Error (StopMining)", err)
+				dlgmLog.Errorf("Error (StopMining) %v", err)
 			}
 			break
 		case "SOLVED":
-			log.Println("SOLVED received", minerMessage)
+			dlgmLog.Infof("SOLVED received %v", minerMessage)
 			headerSolution := wire.HeaderSolution{
 				Address:     minerMessage.Address,
 				Nonce:       minerMessage.Nonce,
 				ExtraNonce:  minerMessage.ExtraNonce,
 				BlockHeight: minerMessage.BlockHeight,
 			}
-			err := s.headerProvider.SetHeaderSolution(&headerSolution, conn)
+			err := s.headerProvider.SetHeaderSolution(&headerSolution, conn, wsId)
 			if err != nil {
-				log.Println("Error (SetHeaderSolution)", err)
+				dlgmLog.Errorf("Error (SetHeaderSolution) %v", err)
 			} else {
 				s.SendHeaderSolution(&headerSolution, conn)
 			}
 			break
+		case "WINNERS":
+			dlgmLog.Debugf("WINNERS request received %v", minerMessage)
+			winners, err := s.getWinners()
+			if err != nil {
+				dlgmLog.Errorf("Error (getWinners) %v", err)
+			} else {
+				s.SendWinners(winners, conn)
+			}
+			break
 		default:
-			log.Println("Unknown message type", minerMessage.Type)
+			dlgmLog.Warnf("Unknown message type %v", minerMessage.Type)
 		}
 	}
 
-	err = s.headerProvider.SocketClosed(conn)
+	err = s.headerProvider.SocketClosed(conn, wsId)
 	if err != nil {
-		log.Printf("Could not close delegate socket %v", err)
+		dlgmLog.Errorf("Could not close delegate socket %v", err)
 	}
-	log.Println("closing websocket handler...")
+	dlgmLog.Infof("closing websocket handler...")
+}
+
+func (s *WebsocketServer) getWinners() (*wire.Winners, error) {
+	solutions, err := delegate.NewSolutions()
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := solutions.FindAll()
+	solutions.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	winners := wire.Winners{
+		Entries: []wire.Winner{},
+	}
+
+	for _, w := range entries {
+		winner := wire.Winner{
+			Address:  w.Address,
+			SolvedAt: w.SolvedAt.Unix(),
+			Hash:     w.Hash,
+		}
+		winners.Entries = append(winners.Entries, winner)
+	}
+
+	return &winners, nil
 }
 
 func (s *WebsocketServer) home(w http.ResponseWriter, r *http.Request) {
@@ -137,13 +177,13 @@ func (s *WebsocketServer) SendHeaderProblem(headerProblem *wire.HeaderProblemRes
 	headerProblem.Type = "PROBLEM"
 	jsonMessage, err := json.Marshal(headerProblem)
 	if err != nil {
-		log.Println("Error during message marshalling:", err)
+		dlgmLog.Errorf("Error during message marshalling: %v", err)
 		return err
 	}
 
 	err = conn.WriteMessage(websocket.TextMessage, jsonMessage)
 	if err != nil {
-		log.Println("Error during message writing:", err)
+		dlgmLog.Errorf("Error during message writing: %v", err)
 		return err
 	}
 	return nil
@@ -154,13 +194,31 @@ func (s *WebsocketServer) SendHeaderSolution(headerSolution *wire.HeaderSolution
 	headerSolution.Type = "SOLUTION"
 	jsonMessage, err := json.Marshal(headerSolution)
 	if err != nil {
-		log.Println("Error during message marshalling:", err)
+		dlgmLog.Errorf("Error during message marshalling: %v", err)
 		return err
 	}
 
 	err = conn.WriteMessage(websocket.TextMessage, jsonMessage)
 	if err != nil {
-		log.Println("Error during message writing:", err)
+		dlgmLog.Errorf("Error during message writing: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+func (s *WebsocketServer) SendWinners(winners *wire.Winners, conn *websocket.Conn) error {
+
+	winners.Type = "WINNERS"
+	jsonMessage, err := json.Marshal(winners)
+	if err != nil {
+		dlgmLog.Errorf("Error during message marshalling: %v", err)
+		return err
+	}
+
+	err = conn.WriteMessage(websocket.TextMessage, jsonMessage)
+	if err != nil {
+		dlgmLog.Errorf("Error during message writing: %v", err)
 		return err
 	}
 
@@ -179,8 +237,8 @@ func (s *WebsocketServer) Start(headerProvider HeaderProvider) {
 	if s.config.WSS_SSL {
 		log.Fatal(http.ListenAndServeTLS(
 			address,
-			"/etc/letsencrypt/live/api.decentravest.com/fullchain.pem",
-			"/etc/letsencrypt/live/api.decentravest.com/privkey.pem",
+			"/etc/letsencrypt/live/api.minerlotto.com/fullchain.pem",
+			"/etc/letsencrypt/live/api.minerlotto.com/privkey.pem",
 			nil))
 	} else {
 		log.Fatal(http.ListenAndServe(address, nil))

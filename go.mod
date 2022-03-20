@@ -10,6 +10,7 @@ require (
 	github.com/btcsuite/winsvc v1.0.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/decred/dcrd/lru v1.0.0
+	github.com/google/uuid v1.3.0
 	github.com/gorilla/websocket v1.4.2
 	github.com/jessevdk/go-flags v1.4.0
 	github.com/jrick/logrotate v1.0.0

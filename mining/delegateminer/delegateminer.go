@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 	"math/rand"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -96,6 +97,7 @@ type DelegateWorker struct {
 	lastTxUpdate    time.Time
 	hashesCompleted uint64
 	conn            *websocket.Conn
+	wsId            string
 	//stop            chan struct{}
 	quit     chan struct{}
 	stopping bool
@@ -120,7 +122,7 @@ type DelegateMiner struct {
 	queryHashesPerSec   chan float64
 	updateHashes        chan uint64
 	quit                chan struct{}
-	delegateWorkers     map[*websocket.Conn]*DelegateWorker
+	delegateWorkers     map[string]*DelegateWorker
 	delegateWorkersLock sync.Mutex
 	solvingBlocksLock   sync.Mutex
 	headerSender        HeaderSender
@@ -247,25 +249,25 @@ out:
 		//	log.Infof("delegateBlockSolver got stop command")
 		//	delegateWorker.stopping = true
 		case <-delegateWorker.quit:
-			log.Infof("delegateBlockSolver got quit command")
+			log.Debugf("delegateBlockSolver got quit command")
 			break out
 		case <-blockUpdateTicker.C:
 
-			log.Infof("delegateBlockSolver blockUpdateTicker")
+			log.Debugf("delegateBlockSolver blockUpdateTicker")
 
 			if !delegateWorker.stopping && !m.isDelegateBlockCurrent(delegateWorker) {
-				log.Infof("delegateBlockSolver not current")
+				log.Debugf("delegateBlockSolver not current")
 				err := m.newBlockProblem(delegateWorker)
 				if err != nil {
-					break out
+					continue
 				}
 
-				log.Infof("delegateBlockSolver sending new problem")
+				log.Debugf("delegateBlockSolver sending new problem")
 				m.headerSender.SendHeaderProblem(&wire.HeaderProblemResponse{
 					Header:      delegateWorker.block.Header,
 					Address:     delegateWorker.address,
 					BlockHeight: delegateWorker.blockHeight,
-					ExtraNonce:  delegateWorker.extraNonce,
+					ExtraNonce:  strconv.FormatUint(delegateWorker.extraNonce, 10),
 				}, delegateWorker.conn)
 			}
 
@@ -273,13 +275,13 @@ out:
 
 		case <-hashUpdateTicker.C:
 
-			log.Infof("delegateBlockSolver hashUpdateTicker")
+			log.Debugf("delegateBlockSolver hashUpdateTicker")
 			hashRates, err := delegate.NewHashrates()
 			if err != nil {
-				break out
+				continue
 			}
 
-			hashesPerSecond := delegateWorker.hashesCompleted / hashUpdateSecs
+			hashesPerSecond := (delegateWorker.hashesCompleted / hashUpdateSecs) * 2
 
 			hashRate := delegate.Hashrate{
 				Address:    delegateWorker.address,
@@ -287,11 +289,13 @@ out:
 				Hashrate:   hashesPerSecond,
 			}
 
-			err = hashRates.Insert(hashRate)
+			_ = hashRates.Insert(hashRate)
 			hashRates.Close()
-			if err != nil || delegateWorker.stopping {
+			if delegateWorker.stopping {
 				break out
 			}
+
+			delegateWorker.hashesCompleted = 0
 
 		default:
 			// Non-blocking select to fall through
@@ -299,9 +303,9 @@ out:
 		}
 	}
 
-	log.Infof("delegateBlockSolver stopping...")
+	log.Debugf("delegateBlockSolver stopping...")
 	m.delegateWorkersLock.Lock()
-	delete(m.delegateWorkers, delegateWorker.conn)
+	delete(m.delegateWorkers, delegateWorker.wsId)
 	m.delegateWorkersLock.Unlock()
 	m.delegatesWg.Done()
 	log.Tracef("Delegate worker done for %s", delegateWorker.address)
@@ -358,12 +362,12 @@ func (m *DelegateMiner) Stop() {
 	//m.delegateWorkersLock.Lock()
 	for _, delegateWorker := range m.delegateWorkers {
 
-		log.Infof("closing delegate quit")
+		log.Debugf("closing delegate quit")
 		close(delegateWorker.quit)
 	}
 	//m.delegateWorkersLock.Unlock()
 
-	log.Infof("waiting for delegates to quit")
+	log.Debugf("waiting for delegates to quit")
 	m.delegatesWg.Wait()
 	m.wg.Wait()
 	m.started = false
@@ -409,7 +413,7 @@ func New(cfg *Config) *DelegateMiner {
 		cfg:               *cfg,
 		queryHashesPerSec: make(chan float64),
 		updateHashes:      make(chan uint64),
-		delegateWorkers:   make(map[*websocket.Conn]*DelegateWorker),
+		delegateWorkers:   make(map[string]*DelegateWorker),
 	}
 }
 
@@ -431,14 +435,14 @@ func (m *DelegateMiner) decodeAddress(address string) (btcutil.Address, error) {
 }
 
 func (m *DelegateMiner) getCurrentBlockHeight() (int32, error) {
-	log.Infof("getCurrentBlockHeight")
+	log.Debugf("getCurrentBlockHeight")
 
 	// Wait until there is a connection to at least one other peer
 	// since there is no way to relay a found block or receive
 	// transactions to work on when there are no connected peers.
-	if m.cfg.ConnectedCount() == 0 {
-		return 0, errors.New("no nodes conntected")
-	}
+	//if m.cfg.ConnectedCount() == 0 {
+	//	return 0, errors.New("no nodes conntected")
+	//}
 
 	// No point in searching for a solution before the chain is
 	// synced.  Also, grab the same lock as used for block
@@ -461,7 +465,7 @@ func (m *DelegateMiner) isDelegateBlockCurrent(delegateWorker *DelegateWorker) b
 	// The current block is stale if the best block
 	// has changed.
 	if !delegateWorker.block.Header.PrevBlock.IsEqual(&best.Hash) {
-		log.Infof("isClientsBlocksOutdated block is stale")
+		log.Debugf("isClientsBlocksOutdated block is stale")
 		return false
 	}
 
@@ -471,7 +475,7 @@ func (m *DelegateMiner) isDelegateBlockCurrent(delegateWorker *DelegateWorker) b
 	// minute.
 	if delegateWorker.lastTxUpdate != m.g.TxSource().LastUpdated() &&
 		time.Now().After(delegateWorker.lastGenerated.Add(time.Minute)) {
-		log.Infof("isClientsBlocksOutdated memory pool updated")
+		log.Debugf("isClientsBlocksOutdated memory pool updated")
 		return false
 	}
 
@@ -479,7 +483,7 @@ func (m *DelegateMiner) isDelegateBlockCurrent(delegateWorker *DelegateWorker) b
 }
 
 func (m *DelegateMiner) newBlockProblem(delegateWorker *DelegateWorker) error {
-	log.Infof("newBlockProblem for %v", delegateWorker.address)
+	log.Debugf("newBlockProblem for %v", delegateWorker.address)
 
 	// Choose a commission address at random.
 	rand.Seed(time.Now().UnixNano())
@@ -514,7 +518,7 @@ func (m *DelegateMiner) newBlockProblem(delegateWorker *DelegateWorker) error {
 }
 
 func (m *DelegateMiner) updateBlockProblem(delegateWorker *DelegateWorker, blockHeight int32) error {
-	log.Infof("updateBlockProblem at height %v", blockHeight)
+	log.Debugf("updateBlockProblem at height %v", blockHeight)
 
 	enOffset, err := wire.RandomUint64()
 	if err != nil {
@@ -533,16 +537,16 @@ func (m *DelegateMiner) updateBlockProblem(delegateWorker *DelegateWorker, block
 	return err
 }
 
-func (m *DelegateMiner) GetHeaderProblem(request *wire.HeaderProblemRequest, conn *websocket.Conn) error {
-	log.Infof("GetHeaderProblem ", request)
+func (m *DelegateMiner) GetHeaderProblem(request *wire.HeaderProblemRequest, conn *websocket.Conn, wsId string) error {
+	log.Debugf("GetHeaderProblem ", request)
 
 	// Wait until there is a connection to at least one other peer
 	// since there is no way to relay a found block or receive
 	// transactions to work on when there are no connected peers.
 
-	if m.cfg.ConnectedCount() == 0 {
-		return errors.New("no nodes connected")
-	}
+	//if m.cfg.ConnectedCount() == 0 {
+	//	return errors.New("no nodes connected")
+	//}
 
 	// No point in searching for a solution before the chain is
 	// synced.  Also, grab the same lock as used for block
@@ -571,16 +575,17 @@ func (m *DelegateMiner) GetHeaderProblem(request *wire.HeaderProblemRequest, con
 	m.delegateWorkersLock.Lock()
 	defer m.delegateWorkersLock.Unlock()
 
-	delegateWorker := m.delegateWorkers[conn]
+	delegateWorker := m.delegateWorkers[wsId]
 	if delegateWorker == nil {
 		delegateWorker = &DelegateWorker{
 			address:     request.Address,
 			blockHeight: nextHeight,
 			conn:        conn,
+			wsId:        wsId,
 			//stop:        make(chan struct{}),
 			quit: make(chan struct{}),
 		}
-		m.delegateWorkers[conn] = delegateWorker
+		m.delegateWorkers[wsId] = delegateWorker
 
 		err = m.newBlockProblem(delegateWorker)
 		if err != nil {
@@ -590,11 +595,11 @@ func (m *DelegateMiner) GetHeaderProblem(request *wire.HeaderProblemRequest, con
 		if err != nil {
 			return err
 		}
-		log.Infof("GetHeaderProblem starting delegateWorker")
+		log.Debugf("GetHeaderProblem starting delegateWorker")
 		m.delegatesWg.Add(1)
 		go m.delegateBlockSolver(delegateWorker)
 	} else {
-		delegateWorker.hashesCompleted = delegateWorker.hashesCompleted + request.HashesCompleted
+		delegateWorker.hashesCompleted = delegateWorker.hashesCompleted + uint64(request.HashesCompleted)
 		delegateWorker.stopping = false
 		err = m.updateBlockProblem(delegateWorker, nextHeight)
 		if err != nil {
@@ -608,34 +613,34 @@ func (m *DelegateMiner) GetHeaderProblem(request *wire.HeaderProblemRequest, con
 		Header:      delegateWorker.block.Header,
 		Address:     request.Address,
 		BlockHeight: nextHeight,
-		ExtraNonce:  delegateWorker.extraNonce,
+		ExtraNonce:  strconv.FormatUint(delegateWorker.extraNonce, 10),
 	}, conn)
 
 	return nil
 }
 
-func (m *DelegateMiner) ReportHashes(request *wire.HashesRequest, conn *websocket.Conn) error {
+func (m *DelegateMiner) ReportHashes(request *wire.HashesRequest, conn *websocket.Conn, wsId string) error {
 
-	delegateWorker := m.delegateWorkers[conn]
+	delegateWorker := m.delegateWorkers[wsId]
 	if delegateWorker == nil {
 		return fmt.Errorf("ReportHashes no delegate worker found for connection")
 	}
 
-	delegateWorker.hashesCompleted = delegateWorker.hashesCompleted + request.HashesCompleted
+	delegateWorker.hashesCompleted = delegateWorker.hashesCompleted + uint64(request.HashesCompleted)
 	return nil
 }
 
-func (m *DelegateMiner) SetHeaderSolution(solution *wire.HeaderSolution, conn *websocket.Conn) error {
+func (m *DelegateMiner) SetHeaderSolution(solution *wire.HeaderSolution, conn *websocket.Conn, wsId string) error {
 
 	m.delegateWorkersLock.Lock()
 	defer m.delegateWorkersLock.Unlock()
 
-	delegateWorker := m.delegateWorkers[conn]
+	delegateWorker := m.delegateWorkers[wsId]
 	if delegateWorker == nil {
 		return fmt.Errorf("SetHeaderSolution no delegate worker found for connection")
 	}
 
-	if delegateWorker.extraNonce != solution.ExtraNonce {
+	if strconv.FormatUint(delegateWorker.extraNonce, 10) != solution.ExtraNonce {
 		return fmt.Errorf("SetHeaderSolution delegate extra nonce %v did not match solved extra nonce %v",
 			delegateWorker.extraNonce, solution.ExtraNonce)
 	}
@@ -649,16 +654,35 @@ func (m *DelegateMiner) SetHeaderSolution(solution *wire.HeaderSolution, conn *w
 
 	solution.BlockHash = block.Hash().String()
 
+	log.Infof("Saving Solution for %s with Hash %s", solution.Address, solution.BlockHash)
+
+	solutions, err := delegate.NewSolutions()
+	if err != nil {
+		return errors.New("could not get solutions db")
+	}
+
+	solutionEntry := delegate.Solution{
+		Address:  delegateWorker.address,
+		SolvedAt: time.Now(),
+		Hash:     solution.BlockHash,
+	}
+
+	err = solutions.Insert(solutionEntry)
+	solutions.Close()
+	if err != nil {
+		return errors.New("could not write solution to db")
+	}
+
 	m.headerSender.SendHeaderSolution(solution, conn)
 
 	return nil
 }
 
-func (m *DelegateMiner) SocketClosed(conn *websocket.Conn) error {
+func (m *DelegateMiner) SocketClosed(conn *websocket.Conn, wsId string) error {
 	//m.delegateWorkersLock.Lock()
 	//defer m.delegateWorkersLock.Unlock()
 
-	delegateWorker := m.delegateWorkers[conn]
+	delegateWorker := m.delegateWorkers[wsId]
 	if delegateWorker == nil {
 		return fmt.Errorf("SocketClosed no delegate worker found for connection")
 	}
@@ -668,9 +692,9 @@ func (m *DelegateMiner) SocketClosed(conn *websocket.Conn) error {
 	return nil
 }
 
-func (m *DelegateMiner) StopMining(conn *websocket.Conn) error {
+func (m *DelegateMiner) StopMining(conn *websocket.Conn, wsId string) error {
 
-	delegateWorker := m.delegateWorkers[conn]
+	delegateWorker := m.delegateWorkers[wsId]
 	if delegateWorker == nil {
 		return fmt.Errorf("SocketClosed no delegate worker found for connection")
 	}

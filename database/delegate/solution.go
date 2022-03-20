@@ -7,43 +7,43 @@ import (
 	"time"
 )
 
-type Hashrates struct {
+type Solutions struct {
 	mu sync.Mutex
 	db *sql.DB
 }
 
-type Hashrate struct {
-	Address    string
-	MeasuredAt time.Time
-	Hashrate   uint64
+type Solution struct {
+	Address  string
+	SolvedAt time.Time
+	Hash     string
 }
 
-const file string = "hashrates.db"
+const file_solutions string = "solutions.db"
 
-const create string = `
-  CREATE TABLE IF NOT EXISTS hashrates (
+const create_solutions string = `
+  CREATE TABLE IF NOT EXISTS solutions (
   	address TEXT NOT NULL,
-    measured_at DATETIME NOT NULL,
-    hashrate INTEGER NOT NULL
+    solved_at DATETIME NOT NULL,
+    hash TEXT NOT NULL
   );
-  CREATE INDEX IF NOT EXISTS idx_address_date
-    ON hashrates (address, measured_at);`
+  CREATE INDEX IF NOT EXISTS idx_address
+    ON solutions (address);`
 
-func NewHashrates() (*Hashrates, error) {
-	db, err := sql.Open("sqlite3", file)
+func NewSolutions() (*Solutions, error) {
+	db, err := sql.Open("sqlite3", file_solutions)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(create); err != nil {
+	if _, err := db.Exec(create_solutions); err != nil {
 		return nil, err
 	}
-	return &Hashrates{
+	return &Solutions{
 		db: db,
 	}, nil
 }
 
-func (c *Hashrates) Insert(hashrate Hashrate) error {
-	_, err := c.db.Exec("INSERT INTO hashrates VALUES(?,?,?);", hashrate.Address, hashrate.MeasuredAt, hashrate.Hashrate)
+func (c *Solutions) Insert(solution Solution) error {
+	_, err := c.db.Exec("INSERT INTO solutions VALUES(?,?,?);", solution.Address, solution.SolvedAt, solution.Hash)
 	if err != nil {
 		return err
 	}
@@ -51,6 +51,27 @@ func (c *Hashrates) Insert(hashrate Hashrate) error {
 	return nil
 }
 
-func (c *Hashrates) Close() error {
+func (c *Solutions) FindAll() ([]Solution, error) {
+	result, err := c.db.Query("SELECT address, solved_at, hash From solutions;")
+	if err != nil {
+		return []Solution{}, err
+	}
+	defer result.Close()
+
+	var solutions []Solution
+
+	for result.Next() {
+		solution := Solution{}
+		err := result.Scan(&solution.Address, &solution.SolvedAt, &solution.Hash)
+		if err != nil {
+			return []Solution{}, err
+		}
+		solutions = append(solutions, solution)
+	}
+
+	return solutions, nil
+}
+
+func (c *Solutions) Close() error {
 	return c.db.Close()
 }
